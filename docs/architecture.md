@@ -110,13 +110,20 @@ setup, troubleshooting and privacy questions with the page they came from.
 | Ingest | `scripts/ingest-docs.mts` (`npm run ingest`) | Reads every PDF page (`unpdf`), splits it into passages, embeds them in batches of 50 and writes the data file. Run again when a PDF changes |
 | Splitter | `lib/copper/split-passages.ts` | `splitIntoPassages`: up to 4 sentences or 600 characters per passage, whole sentences only, never across pages; a short tail joins the passage before it |
 | Data | `lib/copper/data/passages.json` | `{ model, dimensions, createdAt, passages[] }`; each passage has `id`, `documentId`, `title`, `page`, `text` (which starts with the title) and `embedding` |
+| Search | `lib/copper/search.ts` | `searchDocs(question)`: embeds the question (task type `RETRIEVAL_QUERY`), scores every passage by cosine similarity and returns the 5 closest with `id`, `title`, `page`, `text`, `url` (`/docs/<id>.pdf#page=N`) and `score`. `npm run search -- "question"` tries it from the terminal |
+| Tool | `search_docs` in `lib/copper/assistant/tools.ts` | Copper's fifth tool. The instructions send every setup, troubleshooting, warranty, refund, privacy and terms question to it and tell Copper to answer only from the passages, naming the document and page |
+| Tool card | `components/copper/ask-copper.tsx` | Draws each match as a numbered row: document title and page as a link that opens the PDF on that page (new tab), then the passage |
 | Loader | `lib/copper/passages.ts` | `getPassages()`, `getPassageIndexInfo()`, `countPassagesByDocument()`: the file is imported once, so lookups are in memory |
 | Embedding model | `lib/ai/models.ts` `EMBEDDING_MODEL`, `lib/ai/pricing.ts` | `gemini-embedding-001` at 768 dimensions, $0.15 per million tokens read |
-| AI calls | `callEmbed` in `lib/ai/call.ts`, `{ module: 3, feature: "ingest-docs" }` | One row per batch of passages. Google's embedding API reports no token counts, so `input_tokens` and `cost_usd` are null; at $0.15 per million tokens, re-ingesting all four PDFs costs well under one cent |
+| AI calls | `callEmbed` in `lib/ai/call.ts`, `{ module: 3, feature: "ingest-docs" }` and `{ module: 3, feature: "search-docs" }` | One row per batch of passages. Google's embedding API reports no token counts, so `input_tokens` and `cost_usd` are null; at $0.15 per million tokens, re-ingesting all four PDFs costs well under one cent |
 
 **Data flow:** `npm run ingest` → PDF pages → passages (title first) →
 `callEmbed` (task type `RETRIEVAL_DOCUMENT`) → `passages.json` → imported by
-`lib/copper/passages.ts` when the app starts.
+`lib/copper/passages.ts` when the app starts. Then, per question: shopper asks
+→ `askCopper` streams to Gemini with the tools → Gemini calls `search_docs` →
+`searchDocs` embeds the question (`RETRIEVAL_QUERY`), ranks the passages in
+memory → 5 matches back to Gemini → reply that cites document and page, with the
+matches drawn in the tool card.
 
 **Decisions and trade-offs:** Passages are split by sentences, not a fixed
 number of characters, so each one reads whole and can be quoted. The title is
@@ -128,5 +135,8 @@ committed, so Vercel serves it with no database and no key at build time.
 
 **Risks and open questions:** The file must be regenerated when a PDF
 changes (there is no check that it is current). PDF text extraction can
-garble tables and headers, which become part of a passage. Questions will be
-embedded with task type `RETRIEVAL_QUERY` in the next step.
+garble tables and headers, which become part of a passage. Search is a plain
+scan over 94 vectors, which is instant here; a much larger library would need
+a vector database. The model is told to answer only from the passages, but
+that is an instruction, not a guarantee, which is why the card shows the
+source pages for anyone to check.

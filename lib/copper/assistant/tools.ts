@@ -1,6 +1,8 @@
-// Module 2: the four tools Ask Copper can use. Products and prices come from
+// The tools Ask Copper can use. Module 2: products and prices come from
 // lib/copper/catalog.ts and stock from lib/copper/inventory.ts, so the
-// chatbot never has to make them up.
+// chatbot never has to make them up. Module 3: search_docs finds passages in
+// the customer documents (lib/copper/search.ts), so help answers come with
+// the page they were read from.
 // Each tool returns plain data; the model writes the reply around it.
 import { tool } from "ai";
 import { z } from "zod";
@@ -11,6 +13,7 @@ import {
   type ProductId,
 } from "@/lib/copper/catalog";
 import { readInventory } from "@/lib/copper/inventory";
+import { type DocSearch, searchDocs } from "@/lib/copper/search";
 
 export type ProductList = {
   products: {
@@ -177,6 +180,20 @@ export async function checkAvailability(
   };
 }
 
+export const searchDocsInput = z.object({
+  /** The shopper's question, in their words. */
+  question: z.string().min(2).max(500),
+});
+
+export type SearchDocsInput = z.infer<typeof searchDocsInput>;
+
+/** search_docs: the closest passages from the user guides, terms and FAQ. */
+export async function searchDocsTool(
+  input: SearchDocsInput,
+): Promise<DocSearch> {
+  return searchDocs(input.question);
+}
+
 export const copperTools = {
   get_products: tool({
     description:
@@ -200,5 +217,11 @@ export const copperTools = {
       "Checks today's stock for a Copper product, for every color or just one.",
     inputSchema: checkAvailabilityInput,
     execute: async (input) => checkAvailability(input),
+  }),
+  search_docs: tool({
+    description:
+      "Searches Copper's user guides, terms and conditions and Copper Plus FAQ for the 5 passages that best answer a setup, troubleshooting, warranty, refund, privacy or policy question. Each passage comes with its document title, page number and a link to that page.",
+    inputSchema: searchDocsInput,
+    execute: async (input) => searchDocsTool(input),
   }),
 };

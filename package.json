@@ -15,6 +15,7 @@
     "format": "prettier --write .",
     "start-module": "node scripts/start-module.mjs",
     "ingest": "node --env-file-if-exists=.env.local --import tsx scripts/ingest-docs.mts",
+    "search": "node --env-file-if-exists=.env.local --import tsx scripts/search-docs.mts",
     "env:check": "node scripts/check-env.mjs"
   },
   "dependencies": {
