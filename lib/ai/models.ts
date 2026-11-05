@@ -27,3 +27,18 @@ export function defaultModel(): ModelId {
   const id = process.env.AI_MODEL;
   return MODELS.find((m) => m.id === id)?.id ?? DEFAULT_MODEL;
 }
+
+/**
+ * The embedding model: turns a passage of text into a list of numbers (a
+ * vector) so similar passages end up close together. Module 3 embeds the
+ * customer documents with it and, later, each question.
+ */
+export const EMBEDDING_MODEL = {
+  id: "google/gemini-embedding-001",
+  label: "Gemini Embedding 001",
+  googleId: "gemini-embedding-001",
+  /** How many numbers per vector. The model offers up to 3072; 768 keeps the saved file small with almost no loss. */
+  dimensions: 768,
+} as const;
+
+export type EmbeddingModelId = typeof EMBEDDING_MODEL.id;

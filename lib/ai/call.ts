@@ -1,8 +1,13 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { generateText, Output, streamText } from "ai";
+import { embedMany, generateText, Output, streamText } from "ai";
 import type { z } from "zod";
-import { defaultModel, MODELS, type ModelId } from "@/lib/ai/models";
-import { costUsd } from "@/lib/ai/pricing";
+import {
+  defaultModel,
+  EMBEDDING_MODEL,
+  MODELS,
+  type ModelId,
+} from "@/lib/ai/models";
+import { costUsd, type PricedModelId } from "@/lib/ai/pricing";
 
 // Every model call in the app goes through this file, so each one is logged
 // with its tokens, cost and how long it took. The log goes to the terminal
@@ -36,7 +41,7 @@ type TextOptions = DistributiveOmit<
 export type AiCallRow = {
   module: number;
   feature: string;
-  model: ModelId;
+  model: PricedModelId;
   input_tokens: number | null;
   output_tokens: number | null;
   cost_usd: number | null;
@@ -64,7 +69,7 @@ async function logCall(row: AiCallRow): Promise<void> {
 type Usage = { inputTokens?: number; outputTokens?: number };
 
 /** Builds the ai_calls row for a call that started at `started`. */
-function rowFor(info: CallInfo, model: ModelId, started: number) {
+function rowFor(info: CallInfo, model: PricedModelId, started: number) {
   return (ok: boolean, usage?: Usage): AiCallRow => {
     const input = usage?.inputTokens ?? null;
     const output = usage?.outputTokens ?? null;
@@ -124,6 +129,50 @@ export async function callObject<Schema extends z.ZodType>(
   // Spreading `rest` loses generateText's output type; Output.object has
   // already validated it against `schema`, so restore the type here.
   return result as typeof result & { output: z.infer<Schema> };
+}
+
+/** What the text is for: a saved passage, or a question looking for passages. */
+export type EmbedTaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
+
+function embeddingModel() {
+  const googleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+  if (!googleKey) throw new AiNotConfiguredError();
+  return createGoogleGenerativeAI({ apiKey: googleKey }).textEmbedding(
+    EMBEDDING_MODEL.googleId,
+  );
+}
+
+/**
+ * Turns each text into a vector of EMBEDDING_MODEL.dimensions numbers, in the
+ * same order. One ai_calls row per call. Google reports no token count for
+ * embeddings, so its tokens and cost are null in the log.
+ * Example: callEmbed({ module: 3, feature: "ingest-docs" }, { values, taskType: "RETRIEVAL_DOCUMENT" })
+ */
+export async function callEmbed(
+  info: Omit<CallInfo, "model">,
+  options: { values: string[]; taskType: EmbedTaskType },
+): Promise<number[][]> {
+  const row = rowFor(info, EMBEDDING_MODEL.id, performance.now());
+  try {
+    const result = await embedMany({
+      model: embeddingModel(),
+      values: options.values,
+      maxParallelCalls: 2,
+      providerOptions: {
+        google: {
+          outputDimensionality: EMBEDDING_MODEL.dimensions,
+          taskType: options.taskType,
+        },
+      },
+    });
+    await logCall(
+      row(true, { inputTokens: result.usage.tokens, outputTokens: 0 }),
+    );
+    return result.embeddings;
+  } catch (error) {
+    if (!(error instanceof AiNotConfiguredError)) await logCall(row(false));
+    throw error;
+  }
 }
 
 type StreamOptions = DistributiveOmit<
